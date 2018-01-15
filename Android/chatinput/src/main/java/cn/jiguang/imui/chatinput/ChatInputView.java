@@ -7,6 +7,7 @@ import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.Drawable;
 import android.hardware.Camera;
@@ -19,8 +20,8 @@ import android.os.SystemClock;
 import android.support.v4.content.ContextCompat;
 import android.support.v4.widget.Space;
 import android.text.Editable;
+import android.text.TextUtils;
 import android.text.TextWatcher;
-import android.text.format.DateFormat;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
 import android.util.Log;
@@ -30,6 +31,7 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
@@ -43,20 +45,29 @@ import android.widget.RelativeLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.List;
-import java.util.Locale;
 
 import cn.jiguang.imui.chatinput.camera.CameraNew;
 import cn.jiguang.imui.chatinput.camera.CameraOld;
 import cn.jiguang.imui.chatinput.camera.CameraSupport;
+import cn.jiguang.imui.chatinput.emoji.Constants;
+import cn.jiguang.imui.chatinput.emoji.EmojiBean;
+import cn.jiguang.imui.chatinput.emoji.EmojiView;
+import cn.jiguang.imui.chatinput.emoji.listener.EmoticonClickListener;
+import cn.jiguang.imui.chatinput.emoji.data.EmoticonEntity;
+import cn.jiguang.imui.chatinput.emoji.widget.EmoticonsEditText;
+import cn.jiguang.imui.chatinput.emoji.EmoticonsKeyboardUtils;
+import cn.jiguang.imui.chatinput.listener.CameraControllerListener;
+import cn.jiguang.imui.chatinput.listener.CameraEventListener;
 import cn.jiguang.imui.chatinput.listener.OnCameraCallbackListener;
+import cn.jiguang.imui.chatinput.listener.OnClickEditTextListener;
 import cn.jiguang.imui.chatinput.listener.OnFileSelectedListener;
 import cn.jiguang.imui.chatinput.listener.OnMenuClickListener;
 import cn.jiguang.imui.chatinput.model.FileItem;
@@ -65,19 +76,13 @@ import cn.jiguang.imui.chatinput.photo.SelectPhotoView;
 import cn.jiguang.imui.chatinput.record.ProgressButton;
 import cn.jiguang.imui.chatinput.record.RecordControllerView;
 import cn.jiguang.imui.chatinput.record.RecordVoiceButton;
+import cn.jiguang.imui.chatinput.utils.SimpleCommonUtils;
 
 public class ChatInputView extends LinearLayout
         implements View.OnClickListener, TextWatcher, RecordControllerView.OnRecordActionListener,
-        OnFileSelectedListener {
+        OnFileSelectedListener, CameraEventListener, ViewTreeObserver.OnGlobalLayoutListener {
 
-    public static final byte KEYBOARD_STATE_SHOW = -3;
-    public static final byte KEYBOARD_STATE_HIDE = -2;
-    public static final byte KEYBOARD_STATE_INIT = -1;
-
-    public static final int REQUEST_CODE_TAKE_PHOTO = 0x0001;
-    public static final int REQUEST_CODE_SELECT_PHOTO = 0x0002;
-
-    private EditText mChatInput;
+    private EmoticonsEditText mChatInput;
     private TextView mSendCountTv;
     private CharSequence mInput;
     private Space mInputMarginLeft;
@@ -86,6 +91,7 @@ public class ChatInputView extends LinearLayout
     private ImageButton mVoiceBtn;
     private ImageButton mPhotoBtn;
     private ImageButton mCameraBtn;
+    private ImageButton mEmojiBtn;
     private ImageButton mSendBtn;
 
     private LinearLayout mChatInputContainer;
@@ -103,6 +109,7 @@ public class ChatInputView extends LinearLayout
     private RecordVoiceButton mRecordVoiceBtn;
 
     SelectPhotoView mSelectPhotoView;
+    private ImageButton mSelectAlbumIb;
 
     private FrameLayout mCameraFl;
     private TextureView mTextureView;
@@ -113,16 +120,23 @@ public class ChatInputView extends LinearLayout
     private ImageButton mRecordVideoBtn;
     private OnMenuClickListener mListener;
     private OnCameraCallbackListener mCameraListener;
+    private OnClickEditTextListener mEditTextListener;
+    private CameraControllerListener mCameraControllerListener;
+
+    private EmojiView mEmojiRl;
 
     private ChatInputStyle mStyle;
 
     private InputMethodManager mImm;
     private Window mWindow;
-    private int mLastClickId = 0;
 
     private int mWidth;
     private int mHeight;
-    private int mMenuHeight = 300;
+    private int mSoftKeyboardHeight;
+    private int mNowh;
+    private int mOldh;
+    public static int sMenuHeight = 831;
+
     private boolean mShowSoftInput = false;
 
     private long mRecordTime;
@@ -147,13 +161,13 @@ public class ChatInputView extends LinearLayout
     private FileInputStream mFIS;
     private FileDescriptor mFD;
     private boolean mIsEarPhoneOn;
-
     private File mPhoto;
     private CameraSupport mCameraSupport;
     private int mCameraId = -1;
     private boolean mIsBackCamera = true;
     private boolean mIsFullScreen = false;
     private Context mContext;
+    private boolean mInit = true;
 
     public ChatInputView(Context context) {
         super(context);
@@ -175,18 +189,21 @@ public class ChatInputView extends LinearLayout
         inflate(context, R.layout.view_chatinput, this);
 
         // menu buttons
-        mChatInput = (EditText) findViewById(R.id.aurora_et_chat_input);
+        mChatInput = (EmoticonsEditText) findViewById(R.id.aurora_et_chat_input);
         mVoiceBtn = (ImageButton) findViewById(R.id.aurora_menuitem_ib_voice);
         mPhotoBtn = (ImageButton) findViewById(R.id.aurora_menuitem_ib_photo);
         mCameraBtn = (ImageButton) findViewById(R.id.aurora_menuitem_ib_camera);
+        mEmojiBtn = (ImageButton) findViewById(R.id.aurora_menuitem_ib_emoji);
         mSendBtn = (ImageButton) findViewById(R.id.aurora_menuitem_ib_send);
 
         View voiceBtnContainer = findViewById(R.id.aurora_framelayout_menuitem_voice);
         View photoBtnContainer = findViewById(R.id.aurora_framelayout_menuitem_photo);
         View cameraBtnContainer = findViewById(R.id.aurora_framelayout_menuitem_camera);
+        View emojiBtnContainer = findViewById(R.id.aurora_framelayout_menuitem_emoji);
         voiceBtnContainer.setOnClickListener(onMenuItemClickListener);
         photoBtnContainer.setOnClickListener(onMenuItemClickListener);
         cameraBtnContainer.setOnClickListener(onMenuItemClickListener);
+        emojiBtnContainer.setOnClickListener(onMenuItemClickListener);
         mSendBtn.setOnClickListener(onMenuItemClickListener);
 
         mSendCountTv = (TextView) findViewById(R.id.aurora_menuitem_tv_send_count);
@@ -215,8 +232,10 @@ public class ChatInputView extends LinearLayout
         mSwitchCameraBtn = (ImageButton) findViewById(R.id.aurora_ib_camera_switch);
 
         mSelectPhotoView = (SelectPhotoView) findViewById(R.id.aurora_view_selectphoto);
+        mSelectAlbumIb = (ImageButton) findViewById(R.id.aurora_imagebtn_selectphoto_album);
         mSelectPhotoView.setOnFileSelectedListener(this);
         mSelectPhotoView.initData();
+        mEmojiRl = (EmojiView) findViewById(R.id.aurora_rl_emoji_container);
 
         mMenuContainer.setVisibility(GONE);
 
@@ -239,18 +258,60 @@ public class ChatInputView extends LinearLayout
         mHeight = dm.heightPixels;
         mRecordControllerView.setWidth(mWidth);
         mRecordControllerView.setOnControllerListener(this);
+        getViewTreeObserver().addOnGlobalLayoutListener(this);
 
         mChatInput.setOnTouchListener(new OnTouchListener() {
             @Override
             public boolean onTouch(View view, MotionEvent motionEvent) {
-                if (motionEvent.getAction() == MotionEvent.ACTION_DOWN && !mShowSoftInput) {
-                    mShowSoftInput = true;
-                    invisibleMenuLayout();
+                if (mEditTextListener != null) {
+                    mEditTextListener.onTouchEditText();
                 }
+                if (mInit && mSoftKeyboardHeight != 0) {
+                    setMenuContainerHeight(getSoftKeyboardHeight());
+                    mInit = false;
+                }
+                if (!mChatInput.isFocused()) {
+                    mChatInput.setFocusable(true);
+                    mChatInput.setFocusableInTouchMode(true);
+                }
+                mShowSoftInput = true;
                 return false;
             }
         });
     }
+
+    EmoticonClickListener emoticonClickListener = new EmoticonClickListener() {
+        @Override
+        public void onEmoticonClick(Object o, int actionType, boolean isDelBtn) {
+
+            if (isDelBtn) {
+                SimpleCommonUtils.delClick(mChatInput);
+            } else {
+                if (o == null) {
+                    return;
+                }
+                if (actionType == Constants.EMOTICON_CLICK_BIGIMAGE) {
+//                    if(o instanceof EmoticonEntity){
+//                        OnSendImage(((EmoticonEntity)o).getIconUri());
+//                    }
+                } else {
+                    String content = null;
+                    if (o instanceof EmojiBean) {
+                        content = ((EmojiBean) o).emoji;
+                    } else if (o instanceof EmoticonEntity) {
+                        content = ((EmoticonEntity) o).getContent();
+                    }
+
+                    if (TextUtils.isEmpty(content)) {
+                        return;
+                    }
+                    int index = mChatInput.getSelectionStart();
+                    Editable editable = mChatInput.getText();
+                    editable.insert(index, content);
+                }
+            }
+        }
+    };
 
     private void init(Context context, AttributeSet attrs) {
         init(context);
@@ -262,18 +323,19 @@ public class ChatInputView extends LinearLayout
         mChatInput.setTextSize(TypedValue.COMPLEX_UNIT_PX, mStyle.getInputTextSize());
         mChatInput.setTextColor(mStyle.getInputTextColor());
         mChatInput.setHintTextColor(mStyle.getInputHintColor());
-        mChatInput.setBackground(mStyle.getInputEditTextBg());
+        mChatInput.setBackgroundResource(mStyle.getInputEditTextBg());
         mInputMarginLeft.getLayoutParams().width = mStyle.getInputMarginLeft();
         mInputMarginRight.getLayoutParams().width = mStyle.getInputMarginRight();
-        mVoiceBtn.setImageDrawable(mStyle.getVoiceBtnIcon());
+        mVoiceBtn.setImageResource(mStyle.getVoiceBtnIcon());
         mVoiceBtn.setBackground(mStyle.getVoiceBtnBg());
         mPhotoBtn.setBackground(mStyle.getPhotoBtnBg());
-        mPhotoBtn.setImageDrawable(mStyle.getPhotoBtnIcon());
+        mPhotoBtn.setImageResource(mStyle.getPhotoBtnIcon());
         mCameraBtn.setBackground(mStyle.getCameraBtnBg());
-        mCameraBtn.setImageDrawable(mStyle.getCameraBtnIcon());
+        mCameraBtn.setImageResource(mStyle.getCameraBtnIcon());
         mSendBtn.setBackground(mStyle.getSendBtnBg());
-        mSendBtn.setImageDrawable(mStyle.getSendBtnIcon());
+        mSendBtn.setImageResource(mStyle.getSendBtnIcon());
         mSendCountTv.setBackground(mStyle.getSendCountBg());
+        mSelectAlbumIb.setVisibility(mStyle.getShowSelectAlbum() ? VISIBLE : INVISIBLE);
 
         mMediaPlayer.setAudioStreamType(AudioManager.STREAM_RING);
         mMediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
@@ -282,6 +344,8 @@ public class ChatInputView extends LinearLayout
                 return false;
             }
         });
+        SimpleCommonUtils.initEmoticonsEditText(mChatInput);
+        mEmojiRl.setAdapter(SimpleCommonUtils.getCommonAdapter(mContext, emoticonClickListener));
     }
 
     private void setCursor(Drawable drawable) {
@@ -300,6 +364,14 @@ public class ChatInputView extends LinearLayout
 
     public void setOnCameraCallbackListener(OnCameraCallbackListener listener) {
         mCameraListener = listener;
+    }
+
+    public void setCameraControllerListener(CameraControllerListener listener) {
+        mCameraControllerListener = listener;
+    }
+
+    public void setOnClickEditTextListener(OnClickEditTextListener listener) {
+        mEditTextListener = listener;
     }
 
     @Override
@@ -349,61 +421,55 @@ public class ChatInputView extends LinearLayout
                     mSendCountTv.setVisibility(View.INVISIBLE);
                     mSelectPhotoView.resetCheckState();
                     dismissMenuLayout();
+                    mImm.hideSoftInputFromWindow(getWindowToken(), 0);
+                    mWindow.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                            | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                    mShowSoftInput = false;
                 }
 
             } else {
+                if (view.getId() == R.id.aurora_framelayout_menuitem_voice) {
+                    if (mListener != null && mListener.switchToMicrophoneMode()) {
+                        showRecordVoiceLayout();
+                    }
+                } else if (view.getId() == R.id.aurora_framelayout_menuitem_photo) {
+                    if (mListener != null && mListener.switchToGalleryMode()) {
+                        if (ContextCompat.checkSelfPermission(mContext, Manifest.permission.READ_EXTERNAL_STORAGE)
+                                != PackageManager.PERMISSION_GRANTED) {
+                            return;
+                        }
+                        showSelectPhotoLayout();
+                        mSelectPhotoView.initData();
+                        if (mCameraSupport != null) {
+                            mCameraSupport.release();
+                            mCameraSupport = null;
+                        }
+                    }
+                } else if (view.getId() == R.id.aurora_framelayout_menuitem_camera) {
+                    if (mListener != null && mListener.switchToCameraMode()) {
+                        if (Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
+                            if (mCameraSupport == null) {
+                                initCamera();
+                            }
+                            showCameraLayout();
+                        } else {
+                            Toast.makeText(getContext(), getContext().getString(R.string.sdcard_not_exist_toast),
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                } else if (view.getId() == R.id.aurora_framelayout_menuitem_emoji) {
+                    if (mListener != null && mListener.switchToEmojiMode()) {
+                        showEmojiLayout();
+                    }
+                }
+
                 if (mMenuContainer.getVisibility() != VISIBLE) {
                     dismissSoftInputAndShowMenu();
-                } else if (view.getId() == mLastClickId) {
-                    dismissMenuAndResetSoftMode();
-                    return;
                 }
-
-                if (view.getId() == R.id.aurora_framelayout_menuitem_voice) {
-                    if (mListener != null) {
-                        mListener.switchToMicrophoneMode();
-                    }
-                    showRecordVoiceLayout();
-
-                } else if (view.getId() == R.id.aurora_framelayout_menuitem_photo) {
-                    if (mListener != null) {
-                        mListener.switchToGalleryMode();
-                    }
-                    if (ContextCompat.checkSelfPermission(mContext, Manifest.permission.READ_EXTERNAL_STORAGE)
-                            != PackageManager.PERMISSION_GRANTED) {
-                        return;
-                    }
-                    dismissRecordVoiceLayout();
-                    dismissCameraLayout();
-                    mSelectPhotoView.setVisibility(VISIBLE);
-                    mSelectPhotoView.initData();
-
-                } else if (view.getId() == R.id.aurora_framelayout_menuitem_camera) {
-                    if (mListener != null) {
-                        mListener.switchToCameraMode();
-                    }
-                    if (Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
-                        if (mPhoto == null) {
-                            String path = getContext().getFilesDir().getAbsolutePath() + "/photo";
-                            File destDir = new File(path);
-                            if (!destDir.exists()) {
-                                destDir.mkdirs();
-                            }
-                            mPhoto = new File(destDir,
-                                    DateFormat.format("yyyy_MMdd_hhmmss", Calendar.getInstance(Locale.CHINA))
-                                            + ".png");
-                        }
-                        if (mCameraSupport == null) {
-                            initCamera();
-                        }
-                        showCameraLayout();
-                    } else {
-                        Toast.makeText(getContext(), getContext().getString(R.string.sdcard_not_exist_toast),
-                                Toast.LENGTH_SHORT).show();
-                    }
+                if (mShowSoftInput) {
+                    EmoticonsKeyboardUtils.closeSoftKeyboard(mChatInput);
+                    mShowSoftInput = false;
                 }
-
-                mLastClickId = view.getId();
             }
         }
     };
@@ -447,8 +513,14 @@ public class ChatInputView extends LinearLayout
         } else if (view.getId() == R.id.aurora_ib_camera_full_screen) {
             // full screen/recover screen button in texture view
             if (!mIsFullScreen) {
+                if (mCameraControllerListener != null) {
+                    mCameraControllerListener.onFullScreenClick();
+                }
                 fullScreen();
             } else {
+                if (mCameraControllerListener != null) {
+                    mCameraControllerListener.onRecoverScreenClick();
+                }
                 recoverScreen();
             }
 
@@ -517,9 +589,6 @@ public class ChatInputView extends LinearLayout
                 // take picture and send it
             } else {
                 mCameraSupport.takePicture();
-                if (mIsFullScreen) {
-                    recoverScreen();
-                }
             }
         } else if (view.getId() == R.id.aurora_ib_camera_close) {
             try {
@@ -639,7 +708,15 @@ public class ChatInputView extends LinearLayout
                     mediaPlayer.start();
                 }
             });
-        } catch (IOException | IllegalArgumentException | IllegalStateException e) {
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void pauseVoice() {
+        try {
+            mMediaPlayer.pause();
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
@@ -670,7 +747,7 @@ public class ChatInputView extends LinearLayout
             mCameraSupport = new CameraOld(getContext(), mTextureView);
         }
         mCameraSupport.setCameraCallbackListener(mCameraListener);
-        mCameraSupport.setOutputFile(mPhoto);
+        mCameraSupport.setCameraEventListener(this);
         for (int i = 0; i < Camera.getNumberOfCameras(); i++) {
             Camera.CameraInfo info = new Camera.CameraInfo();
             Camera.getCameraInfo(i, info);
@@ -679,33 +756,39 @@ public class ChatInputView extends LinearLayout
                 break;
             }
         }
-        mTextureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-            @Override
-            public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int width, int height) {
-                Log.e("ChatInputView", "Opening camera");
-                mCameraSupport.open(mCameraId, width, height, mIsBackCamera);
-            }
-
-            @Override
-            public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width,
-                                                    int height) {
-                Log.e("ChatInputView", "Texture size changed, Opening camera");
-                if (mTextureView.getVisibility() == VISIBLE) {
+        if (mTextureView.isAvailable()) {
+            mCameraSupport.open(mCameraId, mWidth, sMenuHeight, mIsBackCamera);
+        } else {
+            mTextureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+                @Override
+                public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int width, int height) {
+                    Log.e("ChatInputView", "Opening camera");
                     mCameraSupport.open(mCameraId, width, height, mIsBackCamera);
                 }
-            }
 
-            @Override
-            public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
-                mCameraSupport.release();
-                return false;
-            }
+                @Override
+                public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width,
+                                                        int height) {
+                    Log.e("ChatInputView", "Texture size changed, Opening camera");
+                    if (mTextureView.getVisibility() == VISIBLE && mCameraSupport != null) {
+                        mCameraSupport.open(mCameraId, width, height, mIsBackCamera);
+                    }
+                }
 
-            @Override
-            public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
+                @Override
+                public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
+                    if (null != mCameraSupport) {
+                        mCameraSupport.release();
+                    }
+                    return false;
+                }
 
-            }
-        });
+                @Override
+                public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
+
+                }
+            });
+        }
     }
 
     /**
@@ -731,29 +814,39 @@ public class ChatInputView extends LinearLayout
      * Recover screen
      */
     private void recoverScreen() {
-        Activity activity = (Activity) getContext();
-        WindowManager.LayoutParams attrs = activity.getWindow().getAttributes();
-        attrs.flags &= (~WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        activity.getWindow().setAttributes(attrs);
-        activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
-        mIsFullScreen = false;
-        mCloseBtn.setVisibility(GONE);
-        mFullScreenBtn.setBackgroundResource(R.drawable.aurora_preview_full_screen);
-        mFullScreenBtn.setVisibility(VISIBLE);
-        mChatInputContainer.setVisibility(VISIBLE);
-        mMenuItemContainer.setVisibility(VISIBLE);
-        setMenuContainerHeight(mMenuHeight);
-        ViewGroup.LayoutParams params = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, mMenuHeight);
-        mTextureView.setLayoutParams(params);
-        mRecordVideoBtn.setBackgroundResource(R.drawable.aurora_preview_record_video);
-        mRecordVideoBtn.setVisibility(VISIBLE);
-        mSwitchCameraBtn.setBackgroundResource(R.drawable.aurora_preview_switch_camera);
-        mSwitchCameraBtn.setVisibility(VISIBLE);
-        mCaptureBtn.setBackgroundResource(R.drawable.aurora_menuitem_send_pres);
+        final Activity activity = (Activity) getContext();
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                WindowManager.LayoutParams attrs = activity.getWindow().getAttributes();
+                attrs.flags &= (~WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                activity.getWindow().setAttributes(attrs);
+                activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+                mIsFullScreen = false;
+                mCloseBtn.setVisibility(GONE);
+                mFullScreenBtn.setBackgroundResource(R.drawable.aurora_preview_full_screen);
+                mFullScreenBtn.setVisibility(VISIBLE);
+                mChatInputContainer.setVisibility(VISIBLE);
+                mMenuItemContainer.setVisibility(VISIBLE);
+                setMenuContainerHeight(sMenuHeight);
+                ViewGroup.LayoutParams params = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, sMenuHeight);
+                mTextureView.setLayoutParams(params);
+                mRecordVideoBtn.setBackgroundResource(R.drawable.aurora_preview_record_video);
+                mRecordVideoBtn.setVisibility(VISIBLE);
+                mSwitchCameraBtn.setBackgroundResource(R.drawable.aurora_preview_switch_camera);
+                mSwitchCameraBtn.setVisibility(VISIBLE);
+                mCaptureBtn.setBackgroundResource(R.drawable.aurora_menuitem_send_pres);
+            }
+        });
     }
 
     public void dismissMenuLayout() {
         mMenuContainer.setVisibility(GONE);
+        if (mCameraSupport != null) {
+            mCameraSupport.release();
+            mCameraSupport = null;
+        }
     }
 
     public void invisibleMenuLayout() {
@@ -767,12 +860,21 @@ public class ChatInputView extends LinearLayout
     public void showRecordVoiceLayout() {
         mSelectPhotoView.setVisibility(GONE);
         mCameraFl.setVisibility(GONE);
+        mEmojiRl.setVisibility(GONE);
         mRecordVoiceRl.setVisibility(VISIBLE);
         mRecordContentLl.setVisibility(VISIBLE);
+        mPreviewPlayLl.setVisibility(GONE);
     }
 
     public void dismissRecordVoiceLayout() {
         mRecordVoiceRl.setVisibility(GONE);
+    }
+
+    public void showSelectPhotoLayout() {
+        dismissRecordVoiceLayout();
+        dismissCameraLayout();
+        dismissEmojiLayout();
+        mSelectPhotoView.setVisibility(VISIBLE);
     }
 
     public void dismissPhotoLayout() {
@@ -782,14 +884,30 @@ public class ChatInputView extends LinearLayout
     public void showCameraLayout() {
         dismissRecordVoiceLayout();
         dismissPhotoLayout();
+        dismissEmojiLayout();
         mCameraFl.setVisibility(VISIBLE);
     }
 
     public void dismissCameraLayout() {
+        if (mCameraSupport != null) {
+            mCameraSupport.release();
+            mCameraSupport = null;
+        }
         mCameraFl.setVisibility(GONE);
         ViewGroup.LayoutParams params =
-                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, mMenuHeight);
+                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, sMenuHeight);
         mTextureView.setLayoutParams(params);
+    }
+
+    public void showEmojiLayout() {
+        dismissRecordVoiceLayout();
+        dismissPhotoLayout();
+        dismissCameraLayout();
+        mEmojiRl.setVisibility(VISIBLE);
+    }
+
+    public void dismissEmojiLayout() {
+        mEmojiRl.setVisibility(GONE);
     }
 
     /**
@@ -799,9 +917,9 @@ public class ChatInputView extends LinearLayout
      */
     public void setMenuContainerHeight(int height) {
         if (height > 0) {
-            mMenuHeight = height;
-            mMenuContainer.setLayoutParams(
-                    new LinearLayout.LayoutParams(RelativeLayout.LayoutParams.MATCH_PARENT, height));
+            sMenuHeight = height;
+            ViewGroup.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height);
+            mMenuContainer.setLayoutParams(params);
         }
     }
 
@@ -822,39 +940,41 @@ public class ChatInputView extends LinearLayout
     }
 
     /**
-     * Select aurora_menuitem_photo callback
+     * Select photo callback
      */
     @Override
     public void onFileSelected() {
-        if (mInput.length() == 0 && mSelectPhotoView.getSelectFiles().size() == 1) {
+        int size = mSelectPhotoView.getSelectFiles().size();
+        Log.i("ChatInputView", "select file size: " + size);
+        if (mInput.length() == 0 && size == 1) {
             triggerSendButtonAnimation(mSendBtn, true, true);
         } else if (mInput.length() > 0 && mSendCountTv.getVisibility() != View.VISIBLE) {
             mSendCountTv.setVisibility(View.VISIBLE);
         }
-        mSendCountTv.setText(String.valueOf(mSelectPhotoView.getSelectFiles().size()));
+        mSendCountTv.setText(String.valueOf(size));
     }
 
     /**
-     * Cancel select aurora_menuitem_photo callback
+     * Cancel select photo callback
      */
     @Override
     public void onFileDeselected() {
         int size = mSelectPhotoView.getSelectFiles().size();
+        Log.i("ChatInputView", "deselect file size: " + size);
         if (size > 0) {
             mSendCountTv.setText(String.valueOf(size));
         } else {
+            mSendCountTv.setVisibility(View.INVISIBLE);
             if (mInput.length() == 0) {
                 triggerSendButtonAnimation(mSendBtn, false, true);
-            } else {
-                mSendCountTv.setVisibility(View.INVISIBLE);
             }
         }
     }
 
     /**
-     * Trigger aurora_menuitem_send button animation
+     * Trigger send button animation
      *
-     * @param sendBtn       aurora_menuitem_send button
+     * @param sendBtn       send button
      * @param hasContent    EditText has content or photos have been selected
      * @param isSelectPhoto check if selecting photos
      */
@@ -885,7 +1005,7 @@ public class ChatInputView extends LinearLayout
                     requestLayout();
                     invalidate();
                 }
-                if (hasContent && isSelectPhoto) {
+                if (mSelectPhotoView.getSelectFiles() != null && mSelectPhotoView.getSelectFiles().size() > 0) {
                     mSendCountTv.setVisibility(View.VISIBLE);
                 }
             }
@@ -913,7 +1033,7 @@ public class ChatInputView extends LinearLayout
             public void onAnimationEnd(Animator animator) {
                 if (hasContent) {
                     mSendBtn.setImageDrawable(ContextCompat.getDrawable(getContext(),
-                            R.drawable.aurora_menuitem_send_pres));
+                            mStyle.getSendBtnPressedIcon()));
                 } else {
                     mSendBtn.setImageDrawable(ContextCompat.getDrawable(getContext(),
                             R.drawable.aurora_menuitem_send));
@@ -936,12 +1056,13 @@ public class ChatInputView extends LinearLayout
     }
 
     /**
-     * Set aurora_menuitem_camera capture file path and file name. If user didn't invoke this method, will save in
+     * Set camera capture file path and file name. If user didn't invoke this method, will save in
      * default path.
      *
      * @param path     Photo to be saved in.
      * @param fileName File name.
      */
+    @Deprecated
     public void setCameraCaptureFile(String path, String fileName) {
         File destDir = new File(path);
         if (!destDir.exists()) {
@@ -1035,9 +1156,9 @@ public class ChatInputView extends LinearLayout
         }
 
         dismissMenuLayout();
-        mChatInput.requestFocus();
+//        mChatInput.requestFocus();
         ViewGroup.LayoutParams params =
-                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, mMenuHeight);
+                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, sMenuHeight);
         mTextureView.setLayoutParams(params);
     }
 
@@ -1054,7 +1175,7 @@ public class ChatInputView extends LinearLayout
         if (mImm != null) {
             mImm.hideSoftInputFromWindow(mChatInput.getWindowToken(), 0);
         }
-        setMenuContainerHeight(mMenuHeight);
+        setMenuContainerHeight(sMenuHeight);
         mShowSoftInput = false;
     }
 
@@ -1065,6 +1186,7 @@ public class ChatInputView extends LinearLayout
             mCameraSupport.release();
         }
         mMediaPlayer.release();
+        getViewTreeObserver().removeOnGlobalLayoutListener(this);
         mMediaPlayer = null;
     }
 
@@ -1076,5 +1198,81 @@ public class ChatInputView extends LinearLayout
                 mCameraSupport.release();
             }
         }
+    }
+
+    @Override
+    public void onFinishTakePicture() {
+        if (mIsFullScreen) {
+            recoverScreen();
+        }
+    }
+
+    @Override
+    public void onGlobalLayout() {
+        if (mSoftKeyboardHeight == 0) {
+            try {
+                Rect r = new Rect();
+                ((Activity) mContext).getWindow().getDecorView().getWindowVisibleDisplayFrame(r);
+                mNowh = mHeight - r.bottom;
+                if (mOldh != -1 && mNowh != mOldh) {
+                    mShowSoftInput = mNowh > 0;
+                    if (mShowSoftInput) {
+                        mSoftKeyboardHeight = mNowh;
+                        sMenuHeight = mSoftKeyboardHeight;
+                    }
+                }
+                mOldh = mNowh;
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public int getSoftKeyboardHeight() {
+        return this.mSoftKeyboardHeight;
+    }
+
+    public FrameLayout getCameraContainer() {
+        return mCameraFl;
+    }
+
+    public RelativeLayout getVoiceContainer() {
+        return mRecordVoiceRl;
+    }
+
+    public FrameLayout getSelectPictureContainer() {
+        return mSelectPhotoView;
+    }
+
+    public EmojiView getEmojiContainer() {
+        return mEmojiRl;
+    }
+
+    public ChatInputStyle getStyle() {
+        return this.mStyle;
+    }
+
+    public ImageButton getVoiceBtn() {
+        return this.mVoiceBtn;
+    }
+
+    public ImageButton getPhotoBtn() {
+        return this.mPhotoBtn;
+    }
+
+    public ImageButton getCameraBtn() {
+        return this.mCameraBtn;
+    }
+
+    public ImageButton getEmojiBtn() {
+        return this.mEmojiBtn;
+    }
+
+    public ImageButton getSendBtn() {
+        return this.mSendBtn;
+    }
+
+    public ImageButton getSelectAlbumBtn() {
+        return this.mSelectAlbumIb;
     }
 }

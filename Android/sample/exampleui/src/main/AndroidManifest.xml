@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:name=".IMUISampleApplication"
@@ -16,7 +18,6 @@
         android:theme="@style/AppTheme">
         <activity
             android:name=".messages.MessageListActivity"
-            android:theme="@style/noTitle"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -30,5 +31,4 @@
 
         </activity>
     </application>
-
 </manifest>

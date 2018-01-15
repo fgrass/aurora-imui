@@ -30,15 +30,20 @@ public interface OnMenuClickListener {
     /**
      * Fires when voice button is on click.
      */
-    void switchToMicrophoneMode();
+    boolean switchToMicrophoneMode();
 
     /**
      * Fires when photo button is on click.
      */
-    void switchToGalleryMode();
+    boolean switchToGalleryMode();
 
     /**
      * Fires when camera button is on click.
      */
-    void switchToCameraMode();
+    boolean switchToCameraMode();
+
+    /**
+     * Fires when emoji button is on click.
+     */
+    boolean switchToEmojiMode();
 }

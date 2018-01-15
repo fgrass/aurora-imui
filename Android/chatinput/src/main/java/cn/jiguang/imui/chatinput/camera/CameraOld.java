@@ -13,16 +13,21 @@ import android.util.Log;
 import android.util.SparseIntArray;
 import android.view.Surface;
 import android.view.TextureView;
-import android.widget.RelativeLayout;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.text.SimpleDateFormat;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
+import cn.jiguang.imui.chatinput.listener.CameraEventListener;
 import cn.jiguang.imui.chatinput.listener.OnCameraCallbackListener;
 
 @SuppressWarnings("deprecation")
@@ -33,6 +38,7 @@ public class CameraOld implements CameraSupport {
     private Camera mCamera;
     private TextureView mTextureView;
     private File mPhoto;
+    private File mDir;
     private Context mContext;
     private OnCameraCallbackListener mCameraCallbackListener;
     private MediaRecorder mMediaRecorder;
@@ -42,61 +48,66 @@ public class CameraOld implements CameraSupport {
     private static final int SENSOR_ORIENTATION_DEFAULT_DEGREES = 90;
     private static final int SENSOR_ORIENTATION_INVERSE_DEGREES = 270;
     private static SparseIntArray ORIENTATIONS = new SparseIntArray();
+    private CameraEventListener mCameraEventListener;
+
     static {
         ORIENTATIONS.append(Surface.ROTATION_0, 0);
         ORIENTATIONS.append(Surface.ROTATION_90, 90);
         ORIENTATIONS.append(Surface.ROTATION_180, 180);
         ORIENTATIONS.append(Surface.ROTATION_270, 270);
     }
+
     private boolean mIsFacingBack = true;
 
     public CameraOld(Context context, TextureView textureView) {
         this.mContext = context;
         this.mTextureView = textureView;
+        initPhotoPath();
     }
 
     @Override
     public CameraSupport open(int cameraId, int width, int height, boolean isFacingBack) {
-        this.mCameraId = cameraId;
-        this.mCamera = Camera.open(cameraId);
-        mIsFacingBack = isFacingBack;
-        Camera.Parameters params = mCamera.getParameters();
+        try {
+            this.mCameraId = cameraId;
+            this.mCamera = Camera.open(cameraId);
+            mIsFacingBack = isFacingBack;
+            Camera.Parameters params = mCamera.getParameters();
         /*获取摄像头支持的PictureSize列表*/
-        List<Size> pictureSizeList = params.getSupportedPictureSizes();
+            List<Size> pictureSizeList = params.getSupportedPictureSizes();
         /*从列表中选取合适的分辨率*/
-        mPreviewSize = getProperSize(pictureSizeList, ((float) width) / height);
-        if (null != mPreviewSize) {
-            params.setPictureSize(mPreviewSize.width, mPreviewSize.height);
-        } else {
-            mPreviewSize = params.getPictureSize();
-        }
+            mPreviewSize = getProperSize(pictureSizeList, ((float) width) / height);
+            if (null != mPreviewSize) {
+                params.setPictureSize(mPreviewSize.width, mPreviewSize.height);
+            } else {
+                mPreviewSize = params.getPictureSize();
+            }
         /*获取摄像头支持的PreviewSize列表*/
-        List<Size> previewSizeList = params.getSupportedPreviewSizes();
-        Size preSize = getProperSize(previewSizeList, ((float) width) / height);
-        if (null != preSize) {
-            Log.v("CameraOld", preSize.width + "," + preSize.height);
-            params.setPreviewSize(preSize.width, preSize.height);
-        }
+            List<Size> previewSizeList = params.getSupportedPreviewSizes();
+            Size preSize = getProperSize(previewSizeList, ((float) width) / height);
+            if (null != preSize) {
+                Log.v("CameraOld", preSize.width + "," + preSize.height);
+                params.setPreviewSize(preSize.width, preSize.height);
+            }
 
         /*根据选出的PictureSize重新设置SurfaceView大小*/
-        float w = mPreviewSize.width;
-        float h = mPreviewSize.height;
-        mTextureView.setLayoutParams(new RelativeLayout.LayoutParams((int) (height * (w / h)), height));
+            float w = mPreviewSize.width;
+            float h = mPreviewSize.height;
+            ViewGroup.LayoutParams layoutParams = new FrameLayout.LayoutParams((int) (height * (w / h)), height);
+            mTextureView.setLayoutParams(layoutParams);
 
-        params.setJpegQuality(100); // 设置照片质量
-        if (params.getSupportedFocusModes().contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
-            params.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
-        }
+            params.setJpegQuality(100); // 设置照片质量
+            if (params.getSupportedFocusModes().contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
+                params.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+            }
 
 
-        mCamera.cancelAutoFocus();//只有加上了这一句，才会自动对焦。
-        params.setPictureFormat(ImageFormat.JPEG);
-        mCamera.setParameters(params);
-        try {
+            mCamera.cancelAutoFocus();//只有加上了这一句，才会自动对焦。
+            params.setPictureFormat(ImageFormat.JPEG);
+            mCamera.setParameters(params);
             mCamera.setPreviewTexture(mTextureView.getSurfaceTexture());
             mCamera.setDisplayOrientation(90);
             mCamera.startPreview();
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
 
@@ -112,17 +123,22 @@ public class CameraOld implements CameraSupport {
 
     @Override
     public void release() {
-        mCamera.setPreviewCallback(null);
-        mCamera.stopPreview();
-        mCamera.lock();
-        mCamera.release();
-        mCamera = null;
+        if (mCamera != null) {
+            mCamera.setPreviewCallback(null);
+            mCamera.stopPreview();
+            mCamera.lock();
+            mCamera.release();
+            mCamera = null;
+        }
         releaseMediaRecorder();
     }
 
-    @Override
-    public void setOutputFile(File file) {
-        this.mPhoto = file;
+    private void initPhotoPath() {
+        String path = mContext.getFilesDir().getAbsolutePath() + "/photo";
+        mDir = new File(path);
+        if (!mDir.exists()) {
+            mDir.mkdirs();
+        }
     }
 
     @Override
@@ -131,22 +147,35 @@ public class CameraOld implements CameraSupport {
             @Override
             public void onPictureTaken(byte[] bytes, Camera camera) {
                 try {
+                    final Activity activity = (Activity) mContext;
+                    if (null == activity || null == mCamera) {
+                        return;
+                    }
+                    mPhoto = new File(mDir,
+                            new SimpleDateFormat("yyyy-MM-dd-HHmmss", Locale.getDefault()).format(new Date())
+                                    + ".png");
                     OutputStream outputStream = new FileOutputStream(mPhoto);
+                    Matrix matrix = new Matrix();
+                    Bitmap rotateBmp;
+                    Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    int w = bmp.getWidth();
+                    int h = bmp.getHeight();
                     // 前置摄像头水平翻转照片
                     if (!mIsFacingBack) {
-                        Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                        int w = bmp.getWidth();
-                        int h = bmp.getHeight();
-                        Matrix matrix = new Matrix();
                         matrix.postScale(-1, 1);
-                        Bitmap convertBmp = Bitmap.createBitmap(bmp, 0, 0, w, h, matrix, true);
-                        convertBmp.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
+                        rotateBmp = Bitmap.createBitmap(bmp, 0, 0, w, h, matrix, true);
                     } else {
-                        outputStream.write(bytes);
+                        matrix.postRotate(90);
+                        rotateBmp = Bitmap.createBitmap(bmp, 0, 0, w, h, matrix, true);
                     }
+                    rotateBmp.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
+                    mCamera.startPreview();
                     outputStream.close();
                     if (mCameraCallbackListener != null) {
                         mCameraCallbackListener.onTakePictureCompleted(mPhoto.getAbsolutePath());
+                    }
+                    if (mCameraEventListener != null) {
+                        mCameraEventListener.onFinishTakePicture();
                     }
                 } catch (IOException e) {
                     e.printStackTrace();
@@ -158,6 +187,11 @@ public class CameraOld implements CameraSupport {
     @Override
     public void setCameraCallbackListener(OnCameraCallbackListener listener) {
         mCameraCallbackListener = listener;
+    }
+
+    @Override
+    public void setCameraEventListener(CameraEventListener listener) {
+        mCameraEventListener = listener;
     }
 
     public static Size getProperSize(List<Size> sizeList, float displayRatio) {

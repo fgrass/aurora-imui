@@ -10,7 +10,7 @@
     <LinearLayout
         android:id="@+id/title_container"
         android:layout_width="match_parent"
-        android:layout_height="50dp"
+        android:layout_height="48dp"
         android:background="@color/chat_title_bg"
         android:gravity="center">
 
@@ -23,9 +23,16 @@
 
     </LinearLayout>
 
-    <LinearLayout
+    <cn.jiguang.imui.messages.ptr.PullToRefreshLayout
+        android:id="@+id/pull_to_refresh_layout"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        app:PtrCloseDuration="300"
+        app:PtrCloseHeaderDuration="2000"
+        app:PtrKeepHeaderWhenRefresh="true"
+        app:PtrPullToRefresh="true"
+        app:PtrRatioHeightToRefresh="1.2"
+        app:PtrResistance="1.2"
         android:layout_above="@+id/chat_input"
         android:layout_below="@+id/title_container">
 
@@ -33,20 +40,23 @@
             android:id="@+id/msg_list"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            app:avatarHeight="50dp"
-            app:avatarWidth="50dp"
+            app:avatarHeight="48dp"
+            app:avatarWidth="48dp"
+            app:showReceiverDisplayName="true"
+            app:showSenderDisplayName="false"
+            app:avatarRadius="5dp"
             app:bubbleMaxWidth="0.70"
             app:dateTextSize="14sp"
-            app:receiveBubblePaddingLeft="20dp"
-            app:receiveBubblePaddingRight="10dp"
+            app:receiveBubblePaddingLeft="16dp"
+            app:receiveBubblePaddingRight="8dp"
             app:receiveTextColor="#ffffff"
-            app:receiveTextSize="18sp"
-            app:sendBubblePaddingLeft="10dp"
-            app:sendBubblePaddingRight="20dp"
+            app:receiveTextSize="16sp"
+            app:sendBubblePaddingLeft="8dp"
+            app:sendBubblePaddingRight="16dp"
             app:sendTextColor="#7587A8"
-            app:sendTextSize="18sp" />
+            app:sendTextSize="16sp" />
 
-    </LinearLayout>
+    </cn.jiguang.imui.messages.ptr.PullToRefreshLayout>
 
 
     <cn.jiguang.imui.chatinput.ChatInputView
@@ -54,13 +64,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
-        app:cameraBtnIcon="@drawable/aurora_menuitem_camera"
-        app:inputCursorDrawable="@drawable/aurora_edittext_cursor_bg"
-        app:inputEditTextBg="@drawable/aurora_edittext_bg"
-        app:inputHint="@string/input_hint"
-        app:photoBtnIcon="@drawable/aurora_menuitem_photo"
-        app:sendBtnIcon="@drawable/aurora_menuitem_send"
-        app:voiceBtnIcon="@drawable/aurora_menuitem_mic" />
+        app:showSelectAlbum="true"/>
 
 
 </imui.jiguang.cn.imuisample.views.ChatView>
